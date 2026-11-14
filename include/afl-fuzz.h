@@ -1071,6 +1071,11 @@ typedef struct afl_state {
   u64        frameshift_deadline;
   fs_meta_t *fs_curr_meta;    /* Metadata for the current input (full copy) */
 
+  /* Checksum-aware mutation state (afl-fuzz-checksum.c).  Forward declared
+     here; the full definition lives in afl-checksum.h.  NULL when the
+     feature is disabled (the default). */
+  struct ck_state *ck;
+
   struct skipdet_global *skipdet_g;
 
 #ifdef INTROSPECTION

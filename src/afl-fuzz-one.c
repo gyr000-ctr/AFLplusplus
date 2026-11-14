@@ -26,6 +26,7 @@
  */
 
 #include "afl-fuzz.h"
+#include "afl-checksum.h"
 #include "afl-ijon-min.h"
 #include <string.h>
 #include <limits.h>
@@ -534,6 +535,11 @@ u8 fuzz_one(afl_state_t *afl) {
 
   orig_in = in_buf = queue_testcase_get(afl, afl->queue_cur);
   len = afl->queue_cur->len;
+
+  /* Checksum inference runs on valid queue entries only (they passed the
+     target's integrity checks at least once), and observes a bounded number
+     of seeds before the table is full or inference stops. */
+  ck_observe_seed(afl, in_buf, len);
 
   out_buf = afl_realloc(AFL_BUF_PARAM(out), len);
   if (unlikely(!out_buf)) { PFATAL("alloc"); }
@@ -2116,7 +2122,13 @@ custom_mutator_stage:
 
             }
 
-            if (common_fuzz_stuff(afl, mutated_buf, (u32)mutated_size)) {
+            /* Repair integrity fields after custom mutation as well.  The
+               custom mutator's buffer is never modified: ck_repair() copies
+               into the reusable scratch first and either returns the repaired
+               copy or the original pointer on failure. */
+            u8 *run_buf = ck_repair(afl, mutated_buf, (u32)mutated_size);
+
+            if (common_fuzz_stuff(afl, run_buf, (u32)mutated_size)) {
 
               goto abandon_entry;
 
@@ -3771,9 +3783,26 @@ havoc_stage:
 
     }
 
-    if (likely((temp_len != len) || memcmp(out_buf, in_buf, len))) {
+    /* Checksum-aware repair: recompute every known/inferred integrity field
+       over the mutated input.  On failure ck_repair() returns out_buf
+       untouched, i.e. we transparently fall back to the plain mutation.  No
+       per-iteration allocation happens on the steady-state path. */
+    u8 *ck_buf = ck_repair(afl, out_buf, temp_len);
 
-      if (common_fuzz_stuff(afl, out_buf, temp_len)) { goto abandon_entry; }
+    /* The change test stays on the raw mutation (out_buf), preserving the
+       original no-op skip behavior exactly: a mutation that merely rewrote a
+       checksum slot back to its original value is still skipped.  ck_buf is
+       only used for the execution below.  Both buffers hold temp_len bytes. */
+    if (likely((temp_len != len) || memcmp(out_buf, in_buf, temp_len))) {
+
+      if (common_fuzz_stuff(afl, ck_buf, temp_len)) { goto abandon_entry; }
+
+      /* Target feedback for candidate retirement: a repaired input that
+         reaches new coverage (or at least is saved as interesting) is
+         evidence the checksum layout is right; inputs that produce nothing
+         new count against unconfirmed candidates. */
+      u64 after_finds = afl->queued_items + afl->saved_crashes;
+      ck_report(afl, after_finds != havoc_finds);
 
       u64 cur_finds = afl->queued_items + afl->saved_crashes;
       mopt_commit_round(afl, (u8)(cur_finds != havoc_finds));

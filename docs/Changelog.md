@@ -5,6 +5,13 @@
 
 ### Version ++5.04a (dev)
   - afl-fuzz
+    - new checksum-aware mutation (`AFL_CHECKSUM`, `AFL_CHECKSUM_INFER`,
+      `AFL_CHECKSUM_MAX`): recomputes configured or inferred CRC/sum/XOR and
+      length fields after havoc/splice/custom mutations so targets that
+      validate integrity no longer reject most inputs. Off by default; the
+      steady-state repair path allocates no per-iteration heap memory and
+      falls back to the untouched mutation when repair is impossible. See
+      docs/checksum.md
     - frameshift timeout fix (fixes spurious timeouts that can occur, especially
       with persistent loop counts of 1
   - afl-cc

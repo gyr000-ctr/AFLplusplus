@@ -28,6 +28,7 @@
 #include <signal.h>
 #include <limits.h>
 #include "afl-fuzz.h"
+#include "afl-checksum.h"
 #include "cmplog.h"
 #include "envs.h"
 
@@ -978,6 +979,8 @@ void afl_state_deinit(afl_state_t *afl) {
   ck_free(afl->skipdet_g->virgin_det_bits);
   ck_free(afl->skipdet_g);
   ck_free(afl->havoc_prof);
+
+  ck_deinit(afl);
 
   ck_free(afl->afl_env.afl_forksrv_supl_gids);
 

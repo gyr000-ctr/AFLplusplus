@@ -658,6 +658,25 @@ unit_frameshift: $(COMM_HDR) include/afl-fuzz.h test/unittests/unit_frameshift.c
 	@$(CC) $(CFLAGS) $(ASAN_CFLAGS) -ffunction-sections -fdata-sections test/unittests/unit_frameshift.c src/afl-fuzz-frameshift.c -Wl,--gc-sections -o test/unittests/unit_frameshift $(LDFLAGS) $(ASAN_LDFLAGS) -lcmocka
 	./test/unittests/unit_frameshift
 
+# Checksum-aware mutation. Uses cmocka when the headers are present; the test
+# ships a small built-in assertion shim so it also builds/run on minimal
+# images without libcmocka. The --wrap allocator hooks verify that the steady-
+# state repair path performs no heap allocation.
+unit_checksum: $(COMM_HDR) include/afl-fuzz.h include/afl-checksum.h test/unittests/unit_checksum.c src/afl-fuzz-checksum.c
+	@if printf '#include <cmocka.h>\nint main(void){return 0;}\n' | $(CC) -x c - -lcmocka -o /dev/null > /dev/null 2>&1; then \
+	  $(CC) $(CFLAGS) $(ASAN_CFLAGS) -DHAVE_CMOCKA -ffunction-sections -fdata-sections \
+	    test/unittests/unit_checksum.c src/afl-fuzz-checksum.c -Wl,--gc-sections \
+	    -Wl,--wrap=malloc -Wl,--wrap=calloc -Wl,--wrap=realloc \
+	    -o test/unittests/unit_checksum $(LDFLAGS) $(ASAN_LDFLAGS) -lcmocka ; \
+	else \
+	  echo "[*] cmocka not found, building unit_checksum with built-in shim" ; \
+	  $(CC) $(CFLAGS) $(ASAN_CFLAGS) -ffunction-sections -fdata-sections \
+	    test/unittests/unit_checksum.c src/afl-fuzz-checksum.c -Wl,--gc-sections \
+	    -Wl,--wrap=malloc -Wl,--wrap=calloc -Wl,--wrap=realloc \
+	    -o test/unittests/unit_checksum $(LDFLAGS) $(ASAN_LDFLAGS) ; \
+	fi
+	./test/unittests/unit_checksum
+
 unit_ijon: $(COMM_HDR) include/afl-ijon-min.h test/unittests/unit_ijon.c src/afl-fuzz-ijon.c
 	@$(CC) $(CFLAGS) $(ASAN_CFLAGS) -ffunction-sections -fdata-sections test/unittests/unit_ijon.c src/afl-fuzz-ijon.c -Wl,--gc-sections -Wl,--wrap=write -Wl,--wrap=fsync -Wl,--wrap=close -Wl,--wrap=rename -Wl,--wrap=unlink -o test/unittests/unit_ijon $(LDFLAGS) $(ASAN_LDFLAGS) -lcmocka
 	./test/unittests/unit_ijon
@@ -677,11 +696,11 @@ endif
 
 .PHONY: unit_clean
 unit_clean:
-	@rm -f ./test/unittests/unit_preallocable ./test/unittests/unit_list ./test/unittests/unit_maybe_alloc ./test/unittests/unit_mopt ./test/unittests/unit_cmplog ./test/unittests/unit_ijon_replay ./test/unittests/unit_sharedmem_mmap ./test/unittests/unit_queue_score ./test/unittests/unit_skipdet ./test/unittests/unit_frameshift ./test/unittests/unit_ijon ./test/unittests/unit_value_profile ./test/unittests/unit_testcache test/unittests/unit_mopt.o src/afl-fuzz-mopt-adaptive.o test/unittests/*.o
+	@rm -f ./test/unittests/unit_preallocable ./test/unittests/unit_list ./test/unittests/unit_maybe_alloc ./test/unittests/unit_mopt ./test/unittests/unit_cmplog ./test/unittests/unit_ijon_replay ./test/unittests/unit_sharedmem_mmap ./test/unittests/unit_queue_score ./test/unittests/unit_skipdet ./test/unittests/unit_frameshift ./test/unittests/unit_checksum ./test/unittests/unit_ijon ./test/unittests/unit_value_profile ./test/unittests/unit_testcache test/unittests/unit_mopt.o src/afl-fuzz-mopt-adaptive.o test/unittests/*.o
 
 .PHONY: unit
 ifneq "$(SYS)" "Darwin"
-unit:	unit_maybe_alloc unit_preallocable unit_list unit_clean unit_rand unit_hash unit_mopt unit_cmplog unit_ijon_replay unit_sharedmem_mmap unit_queue_score unit_skipdet unit_frameshift unit_ijon unit_value_profile unit_testcache
+unit:	unit_maybe_alloc unit_preallocable unit_list unit_clean unit_rand unit_hash unit_mopt unit_cmplog unit_ijon_replay unit_sharedmem_mmap unit_queue_score unit_skipdet unit_frameshift unit_checksum unit_ijon unit_value_profile unit_testcache
 else
 unit:
 	@echo [-] unit tests are skipped on Darwin \(lacks GNU linker feature --wrap\)

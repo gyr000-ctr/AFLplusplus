@@ -27,6 +27,7 @@
  */
 
 #include "afl-fuzz.h"
+#include "afl-checksum.h"
 #include "afl-ijon-min.h"
 #include "alloc-inl.h"
 #include "cmplog.h"
@@ -2469,6 +2470,10 @@ void afl_setup_environment(afl_state_t *afl) {
   }
 
   setup_custom_mutators(afl);
+
+  /* Checksum-aware mutation: no-op unless AFL_CHECKSUM / AFL_CHECKSUM_INFER
+     are set, so the default mutation path stays unchanged. */
+  ck_init(afl);
 
   if (afl->afl_env.afl_custom_mutator_only) {
 

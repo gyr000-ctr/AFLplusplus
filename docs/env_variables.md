@@ -707,6 +707,22 @@ checks or alter some of the more exotic semantics of the tool:
     binary may not have a report in the captured output (the report comes from
     that other binary).
 
+  - `AFL_CHECKSUM` enables checksum/length-aware post-mutation repair using an
+    explicit region specification (`algo:off[:width[:endian[:roff[:rend[...]]]]]`,
+    multiple regions separated by `;`). After each mutation the configured CRC,
+    sum/XOR and length fields are recomputed so the target's integrity checks
+    accept the mutated input. See [checksum.md](checksum.md) for the full syntax
+    and algorithm list. Unset by default; when unset the mutation path is
+    unchanged.
+
+  - Setting `AFL_CHECKSUM_INFER=1` additionally infers candidate checksum and
+    length regions from the first few valid queue entries. Inferred candidates
+    are promoted or retired from target feedback, so misinference self-heals.
+
+  - `AFL_CHECKSUM_MAX` bounds the region table (default `16`, hard maximum
+    `32`). The table is fixed-size and the steady-state repair path performs
+    no per-iteration heap allocation.
+
   - Setting `AFL_CUSTOM_MUTATOR_LIBRARY` to a shared library with
     afl_custom_fuzz() creates additional mutations through this library. If
     afl-fuzz is compiled with Python (which is autodetected during building
