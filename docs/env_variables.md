@@ -1075,6 +1075,41 @@ checks or alter some of the more exotic semantics of the tool:
     the remaining credit, so a single slice cannot overshoot the configured
     overhead by a full analysis budget.
 
+  - Setting `AFL_SEQUENCE_FUZZING=1` enables the optional stateful/sequence
+    fuzzing stage. Inputs are split into message sequences (delimiter based),
+    a bounded state model (message-type chain) is learned from the corpus,
+    and an extra mutation stage splices, replays, reorders and drops whole
+    messages along the observed (legal) transitions; mutations that would
+    create never-observed transitions are downweighted but still occasionally
+    tried. This helps targets that require multi-step handshakes or
+    transactions. Inputs that do not contain the delimiter are fuzzed with
+    the classic byte-level stages unchanged (stateless fallback). The state,
+    type and transition tables are fixed-size and never grow past their
+    configured bounds. Target state resets are inherent (each execution is a
+    fresh forkserver child; the input is the full transcript). The stage
+    coexists with CmpLog/LAF and custom mutators.
+
+  - `AFL_SEQ_DELIM` sets the message delimiter for sequence fuzzing (default:
+    `\n`). The escapes `\n`, `\r`, `\t`, `\0` and `\\` are honored, e.g.
+    `AFL_SEQ_DELIM="\r\n"` or `AFL_SEQ_DELIM="\0"`.
+
+  - `AFL_SEQ_MAX_MSGS` caps how many messages are parsed per input (default
+    64, hard cap 4096). Longer inputs have their tail merged into the last
+    message, and a single mutation never copies more than one donor message
+    plus the current input.
+
+  - `AFL_SEQ_MAX_STATES` sets the capacity of the bounded state table
+    (default 16384, hard cap 4M). The type table has the same capacity and
+    the transition table four times it. When a table is full, learning stops
+    growing the model instead of growing memory without bound.
+
+  - `AFL_SEQ_TYPE_LEN` selects how the message type (the state-transition
+    key) is derived: 0 (default) uses the first whitespace-delimited token of
+    a message (up to 16 bytes), N > 0 uses the first N bytes of the message.
+    Alternatively, a custom mutator can export `afl_custom_seq_state` to map
+    each message to a user-defined type/state id (e.g. derived from protocol
+    response features); see docs/custom_mutators.md.
+
   - Normally a `README.txt` is written to the `crashes/` directory when a first
     crash is found. Setting `AFL_NO_CRASH_README` will prevent this. Useful when
     counting crashes based on a file count in that directory.

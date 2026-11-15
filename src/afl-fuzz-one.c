@@ -2023,6 +2023,25 @@ skip_extras:
 
   if (!afl->queue_cur->passed_det) { mark_as_det_done(afl, afl->queue_cur); }
 
+  /************************
+   * SEQUENCE / STATEFUL  *
+   ************************/
+
+  /* Optional stateful sequence fuzzing (AFL_SEQUENCE_FUZZING): splice,
+     replay, reorder and drop messages along the learned state model. Inputs
+     that are not message sequences fall through to the classic stages
+     unchanged. */
+
+  if (unlikely(afl->afl_env.afl_sequence_fuzzing && !afl->custom_only)) {
+
+    if (unlikely(sequence_stage(afl, in_buf, len, perf_score))) {
+
+      goto abandon_entry;
+
+    }
+
+  }
+
 custom_mutator_stage:
   /*******************
    * CUSTOM MUTATORS *

@@ -124,6 +124,11 @@ void afl_state_init(afl_state_t *afl, uint32_t map_size) {
   /* 10% FrameShift overhead default */
   afl->afl_env.afl_frameshift_max_overhead = 0.10;
 
+  /* Stateful/sequence fuzzing defaults */
+  afl->afl_env.afl_seq_max_msgs = SEQ_DEFAULT_MAX_MSGS;
+  afl->afl_env.afl_seq_max_states = SEQ_DEFAULT_MAX_STATES;
+  afl->afl_env.afl_seq_type_len = 0;
+
 }
 
 void afl_resize_map_buffers(afl_state_t *afl, u32 old_size, u32 new_size) {
@@ -782,6 +787,41 @@ void read_afl_environment(afl_state_t *afl, char **envp) {
 
             }
 
+          } else if (!strncmp(env, "AFL_SEQUENCE_FUZZING",
+
+                              afl_environment_variable_len)) {
+
+            afl->afl_env.afl_sequence_fuzzing =
+                get_afl_env(afl_environment_variables[i]) ? 1 : 0;
+
+          } else if (!strncmp(env, "AFL_SEQ_DELIM",
+
+                              afl_environment_variable_len)) {
+
+            afl->afl_env.afl_seq_delim =
+                (u8 *)get_afl_env(afl_environment_variables[i]);
+
+          } else if (!strncmp(env, "AFL_SEQ_MAX_MSGS",
+
+                              afl_environment_variable_len)) {
+
+            afl->afl_env.afl_seq_max_msgs =
+                atoi((u8 *)get_afl_env(afl_environment_variables[i]));
+
+          } else if (!strncmp(env, "AFL_SEQ_MAX_STATES",
+
+                              afl_environment_variable_len)) {
+
+            afl->afl_env.afl_seq_max_states =
+                atoi((u8 *)get_afl_env(afl_environment_variables[i]));
+
+          } else if (!strncmp(env, "AFL_SEQ_TYPE_LEN",
+
+                              afl_environment_variable_len)) {
+
+            afl->afl_env.afl_seq_type_len =
+                atoi((u8 *)get_afl_env(afl_environment_variables[i]));
+
           } else if (!strncmp(env, "AFL_FRAMESHIFT_DISABLE",
 
                               afl_environment_variable_len)) {
@@ -909,6 +949,7 @@ void afl_state_deinit(afl_state_t *afl) {
   }
 
   if (afl->cmplog_binary) { ck_free(afl->cmplog_binary); }
+  afl_seq_deinit(afl);
   if (afl->sync_states) {
 
     for (u32 i = 0; i < afl->sync_states_cnt; ++i) {

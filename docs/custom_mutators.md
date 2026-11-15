@@ -59,6 +59,7 @@ size_t afl_custom_havoc_mutation(void *data, unsigned char *buf, size_t buf_size
 unsigned char afl_custom_havoc_mutation_probability(void *data);
 unsigned char afl_custom_queue_get(void *data, const unsigned char *filename);
 void (*afl_custom_fuzz_send)(void *data, const u8 *buf, size_t buf_size);
+u32 afl_custom_seq_state(void *data, const unsigned char *msg, size_t msg_len);
 u8 afl_custom_queue_new_entry(void *data, const unsigned char *filename_new_queue, const unsigned int *filename_orig_queue);
 const char* afl_custom_introspection(my_mutator_t *data);
 void afl_custom_deinit(void *data);
@@ -204,6 +205,16 @@ def deinit():  # optional for Python
     services.)
 
     Example: [custom_mutators/examples/custom_send.c](../custom_mutators/examples/custom_send.c)
+
+- `afl_custom_seq_state` (optional):
+
+    Only used together with the stateful/sequence fuzzing stage
+    (`AFL_SEQUENCE_FUZZING=1`, see docs/env_variables.md). It is called once
+    per message of a parsed input sequence (delimiter already stripped) and
+    must return a user-defined message type id. When present, it replaces the
+    built-in token/prefix based message typing, so protocol-specific state —
+    e.g. inferred from response features — can be encoded into the learned
+    state model.
 
 - `queue_new_entry` (optional):
 

@@ -242,6 +242,68 @@ struct frameshift_stats {
 
 };
 
+/* Stateful / sequence fuzzing (AFL_SEQUENCE_FUZZING).
+   Inputs are split into message sequences by a delimiter; the fuzzer learns a
+   bounded state model (message-type chain) from the corpus and uses it to
+   splice/replay/reorder messages along observed (legal) transitions. */
+
+#define SEQ_MAX_EXEMPLARS 4             /* donor samples kept per msg type */
+#define SEQ_TOKEN_MAX 16                /* max bytes of a message type key */
+#define SEQ_ID_NONE 0xFFFFFFFFU         /* unknown state/type id           */
+#define SEQ_DEFAULT_MAX_MSGS 64U        /* default msg cap per input       */
+#define SEQ_DEFAULT_MAX_STATES 16384U   /* default state table capacity    */
+#define SEQ_MAX_MSGS_CAP 4096U          /* hard cap for AFL_SEQ_MAX_MSGS   */
+#define SEQ_MAX_STATES_CAP (1U << 22)   /* hard cap for AFL_SEQ_MAX_STATES */
+
+/* One message of a parsed input sequence */
+typedef struct seq_msg {
+
+  u32 off;                            /* offset in the input buffer      */
+  u32 len;                            /* length without the delimiter    */
+
+} seq_msg_t;
+
+/* A sample location of a message of a given type inside the queue */
+typedef struct seq_exemplar {
+
+  u32 queue_id;                       /* queue entry holding the sample  */
+  u32 offset;                         /* offset of the message in it     */
+  u32 len;                            /* message length (no delimiter)   */
+
+} seq_exemplar_t;
+
+/* Message type table entry (open addressing, bounded) */
+typedef struct seq_type {
+
+  u64 hash;                           /* type key hash, 0 = empty slot   */
+  u32 id;                             /* type id                         */
+  u32 count;                          /* times observed (saturating)     */
+  u32 ex_count;                       /* valid entries in ex[]           */
+  u32 ex_seen;                        /* reservoir sampling counter      */
+  seq_exemplar_t ex[SEQ_MAX_EXEMPLARS];
+
+} seq_type_t;
+
+/* State table entry: a state is the chain hash of the message-type
+   sequence consumed so far (open addressing, bounded) */
+typedef struct seq_state {
+
+  u64 hash;                           /* chain hash, 0 = empty slot      */
+  u32 id;                             /* state id                        */
+  u32 depth;                          /* messages consumed to reach here */
+  u32 hits;                           /* times reached (saturating)      */
+
+} seq_state_t;
+
+/* Observed transition (from_state, type) -> to_state (bounded hash set) */
+typedef struct seq_trans {
+
+  u64 key;                            /* (from << 32) | type, +1; 0=empty*/
+  u32 to_state;
+  u32 count;                          /* times observed (saturating)     */
+
+} seq_trans_t;
+
 struct skipdet_entry {
 
   u8  continue_inf, done_eff, eff_probe;
@@ -430,6 +492,7 @@ enum {
   STAGE_FLIP32,
   STAGE_HAVOC,
   STAGE_SPLICE,
+  STAGE_SEQUENCE,
   STAGE_CUSTOM_MUTATOR,
   STAGE_PYTHON,
   STAGE_COLORIZATION,
@@ -611,7 +674,7 @@ typedef struct afl_env_vars {
       afl_final_sync, afl_ignore_seed_problems, afl_disable_redundant,
       afl_sha1_filenames, afl_no_sync, afl_no_fastresume, afl_force_fastresume,
       afl_forksrv_uid_set, afl_forksrv_gid_set, afl_frameshift_disabled,
-      afl_crash_traces, afl_starved_minimize_queue;
+      afl_crash_traces, afl_starved_minimize_queue, afl_sequence_fuzzing;
 
   u16 afl_forksrv_nb_supl_gids;
 
@@ -620,9 +683,12 @@ typedef struct afl_env_vars {
       *afl_max_det_extras, *afl_statsd_host, *afl_statsd_port,
       *afl_crash_exitcode, *afl_statsd_tags_flavor, *afl_testcache_size,
       *afl_testcache_entries, *afl_child_kill_signal, *afl_fsrv_kill_signal,
-      *afl_target_env, *afl_persistent_record, *afl_exit_on_time;
+      *afl_target_env, *afl_persistent_record, *afl_exit_on_time,
+      *afl_seq_delim;
 
   s32 afl_pizza_mode, afl_ijon_history_limit;
+
+  u32 afl_seq_max_msgs, afl_seq_max_states, afl_seq_type_len;
 
   uid_t afl_forksrv_uid;
 
@@ -1071,6 +1137,30 @@ typedef struct afl_state {
   u64        frameshift_deadline;
   fs_meta_t *fs_curr_meta;    /* Metadata for the current input (full copy) */
 
+  /* Stateful / sequence fuzzing (AFL_SEQUENCE_FUZZING). All tables are
+     fixed-capacity open-addressing hash tables: they never grow past the
+     configured bounds and degrade to no-op inserts when full. */
+  u8 seq_enabled,                       /* sequence fuzzing active?         */
+      seq_announced,                    /* startup banner printed?          */
+      seq_tables_full;                  /* a table hit its capacity         */
+  u8  *seq_delim;                       /* message delimiter bytes          */
+  u32  seq_delim_len;                   /* delimiter length                 */
+  u32  seq_max_msgs;                    /* max messages parsed per input    */
+  u32  seq_states_cap, seq_states_cnt;  /* state table capacity/entries     */
+  u32  seq_types_cap, seq_types_cnt;    /* type table capacity/entries      */
+  u32  seq_trans_cap, seq_trans_cnt;    /* transition table capacity/entries*/
+  seq_state_t *seq_states;              /* bounded state table              */
+  seq_type_t  *seq_types;               /* bounded message type table       */
+  seq_trans_t *seq_trans;               /* bounded transition table         */
+  seq_msg_t   *seq_msgs;                /* parse scratch (seq_max_msgs)     */
+  u32         *seq_msg_types;           /* per-message type ids (scratch)   */
+  u32         *seq_msg_states;          /* per-prefix state ids (scratch)   */
+  u8          *seq_buf;                 /* candidate build buffer           */
+  u64 seq_finds,                        /* interesting inputs from seq stage*/
+      seq_cycles,                       /* seq stage mutations performed    */
+      seq_skipped,                      /* inputs not parseable as sequence */
+      seq_downgraded;                   /* illegal transitions downweighted */
+
   struct skipdet_global *skipdet_g;
 
 #ifdef INTROSPECTION
@@ -1359,6 +1449,22 @@ struct custom_mutator {
    * @param data pointer returned in afl_custom_init by this custom mutator
    */
   void (*afl_custom_post_run)(void *data);
+
+  /**
+   * Optional user callback for stateful/sequence fuzzing
+   * (AFL_SEQUENCE_FUZZING): map one message of an input sequence to a
+   * user-defined message type/state id. When present, this replaces the
+   * built-in token/prefix based type inference, so the user can encode
+   * protocol-specific state (e.g. from response features) into the model.
+   *
+   * (Optional)
+   *
+   * @param data pointer returned in afl_custom_init by this custom mutator
+   * @param msg pointer to the message (delimiter already stripped)
+   * @param msg_len length of the message
+   * @return user-defined message type id
+   */
+  u32 (*afl_custom_seq_state)(void *data, const u8 *msg, size_t msg_len);
 
   /**
    * Allow for additional analysis (e.g. calling a different tool that does a
@@ -1666,6 +1772,16 @@ void fs_restore(fs_meta_t *meta);
 int fs_track_insert(fs_meta_t *meta, u64 idx, u64 data_size, u8 ignore_invalid);
 void fs_track_delete(fs_meta_t *meta, u64 idx, u64 data_size);
 void fs_clone_meta(afl_state_t *afl);
+
+/* Stateful / sequence fuzzing (afl-fuzz-sequence.c) */
+void afl_seq_init(afl_state_t *);
+void afl_seq_deinit(afl_state_t *);
+u32  afl_seq_parse(afl_state_t *, const u8 *, u32, seq_msg_t *, u32);
+u32  afl_seq_type_id(afl_state_t *, const u8 *, u32, u8);
+u32  afl_seq_state_step(afl_state_t *, u32, u32, u8);
+u32  afl_seq_trans_find(afl_state_t *, u32, u32);
+void afl_seq_learn(afl_state_t *, const u8 *, u32, u32);
+u8   sequence_stage(afl_state_t *, u8 *, u32, u32);
 
 /**** Inline routines ****/
 

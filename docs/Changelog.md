@@ -5,6 +5,14 @@
 
 ### Version ++5.04a (dev)
   - afl-fuzz
+    - new optional stateful/sequence fuzzing stage (AFL_SEQUENCE_FUZZING=1):
+      inputs are split into message sequences (AFL_SEQ_DELIM), a bounded
+      state model is learned from the corpus, and messages are spliced,
+      replayed, reordered and dropped along observed (legal) transitions
+      while illegal transitions are downweighted. Bounds via AFL_SEQ_MAX_MSGS
+      and AFL_SEQ_MAX_STATES; message typing via AFL_SEQ_TYPE_LEN or the new
+      optional custom mutator hook afl_custom_seq_state. Inputs that are not
+      message sequences fall back to classic byte-level fuzzing unchanged.
     - frameshift timeout fix (fixes spurious timeouts that can occur, especially
       with persistent loop counts of 1
     - timeout fix for slow starting targets (until they reach the fork server)

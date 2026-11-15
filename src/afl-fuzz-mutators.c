@@ -454,6 +454,18 @@ struct custom_mutator *load_custom_mutator(afl_state_t *afl, const char *fn) {
 
   }
 
+  /* "afl_custom_seq_state", optional (stateful sequence fuzzing) */
+  mutator->afl_custom_seq_state = dlsym(dh, "afl_custom_seq_state");
+  if (!mutator->afl_custom_seq_state) {
+
+    ACTF("optional symbol 'afl_custom_seq_state' not found.");
+
+  } else {
+
+    OKF("Found 'afl_custom_seq_state'.");
+
+  }
+
   /* "afl_custom_queue_new_entry", optional */
   mutator->afl_custom_queue_new_entry = dlsym(dh, "afl_custom_queue_new_entry");
   if (!mutator->afl_custom_queue_new_entry) {
